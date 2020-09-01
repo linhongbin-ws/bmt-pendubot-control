@@ -1,4 +1,4 @@
-classdef pendubot_controller
+classdef pendubot_controller < handle
     properties
         % basic param
         motor1
@@ -64,33 +64,63 @@ classdef pendubot_controller
         % record param
         maxRecordBuffer = 10000
         
+        % decode position-wraping params
+        angThres = 190;
+        
+        
+        % streaming variable
+        record_buffer = cell(1, 7)
+        origin_absPos1 = 0
+        origin_absPos2 = 0
+        isInitPlot = true
+        desTor1 = 0
+        desTor2 = 0 
+        isVelExceed1 = false
+        isVelExceed2 = false
+        is_safeTrip = true
+        prevPos1 = 0 
+        prevPos2 = 0
+        pos1 = 0
+        pos2 = 0
+        absPos1 = 0 
+        absPos2 = 0 
+        absC1 = 0
+        absC2 = 0
+        dq1_fil = 0
+        dq2_fil = 0         
+        prev_q1 = 0
+        q1 = 0
+        prev_q2 = 0 
+        q2 = 0
+        q1_fil = 0 
+        q2_fil = 0
+        elapseTime
+        prev_mTime
+        mTime
+        des_q1
+        des_q2
+        des_dq1_fil
+        des_dq2_fil
+
+        
     end
     
     methods
         function obj = pendubot_controller()
+            % add path to mx_vesc
+            addpath('./mx_vesc')
+            
+            % create communication with VESCs
             obj.motor1 = mx_vesc('/dev/VESC_001');
             obj.motor2 = mx_vesc('/dev/VESC_002');
-
-            
-            obj.timeStart = mx_sleep(0);
-            obj.timeNow = obj.timeStart;
              
-            global RecordCell origin_absPos1 origin_absPos2 isInitPlot desTor1 desTor2  isVelExceed1 isVelExceed2 safeTorTrip
-
-            isVelExceed1 = false;
-            isVelExceed2 = false;
-            RecordCell = cell(1, 7);
-            origin_absPos1 = 0;
-            origin_absPos2 = 0;
-            isInitPlot = true;
-            desTor1 = 0;
-            desTor2 = 0; 
-            safeTorTrip = true;
         end
         
         function obj = start(obj)
             
-            obj.turnOnSafeTorTrip();
+            obj.reset_streamVar();
+            
+            obj.set_isSafeTrip();
             
             % basic task that must run
             obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control); 
@@ -114,11 +144,9 @@ classdef pendubot_controller
             obj.motor1.open();
             obj.motor2.open();
             
-            %
-            a  = mx_sleep(0.5);
             
-            % set current joint position as origin
-            obj.set_measureOrigin();
+            % set current joint position as initial position
+            obj.set_measureInitial();
   
             obj.timeStart = mx_sleep(0);
             obj.timeNow = obj.timeStart;
@@ -136,7 +164,6 @@ classdef pendubot_controller
         
         function obj = run(obj)
             
-            global elapseTime 
             obj.timeNow = mx_sleep(0.00001); % sleeps thread for 10us
             
             % basic task that must run
@@ -154,58 +181,47 @@ classdef pendubot_controller
             if obj.isTaskPID
                 obj.taskPID.run(obj.timeNow);
             end
-
-
             
-            
-            elapseTime = obj.timeNow - obj.timeStart;
+            obj.elapseTime = obj.timeNow - obj.timeStart;
         end
         
         function obj = setTaskPrinter(obj, isTaskPrinter)
             obj.isTaskPrinter = isTaskPrinter;
             if(isTaskPrinter)
                 obj.taskPrint =  mx_task(@()obj.task_printer, obj.dT_print);
+            else
+                obj.taskPrint = [];
             end
-   
         end
         
         function obj = setEnableSafeTrip(obj, isEnableSafeTrip)
             obj.isEnableSafeTrip =  isEnableSafeTrip;
-            obj.safeTorTrip = true;
+            obj.is_safeTrip = true;
         end
         
         function obj = setTaskPlotter(obj, isTaskPlotter)
             obj.isTaskPlotter = isTaskPlotter;
             if isTaskPlotter
                 obj.taskPlotter =  mx_task(@()obj.task_plotter, obj.dT_plotter);
+            else
+                obj.taskPlotter = [];
             end
         end
         
         
         function obj = setTaskPID(obj, isTaskPID)
             obj.isTaskPID = isTaskPID;
-            obj.taskPID = mx_task(@()obj.task_PID, obj.dT_PID);
+            if isTaskPID
+                obj.taskPID = mx_task(@()obj.task_PID, obj.dT_PID);
+            else
+                obj.taskPID = [];
+            end
         end
         
         
-        function set_measureOrigin(obj)
-            global  prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2   origin_absPos1 origin_absPos2  dq1_fil dq2_fil          
-            global prev_q1 q1 prev_q2 q2 q1_fil q2_fil prev_mTime mTime
-
-            absC1 = 0;
-            absC2 = 0;
-            prevPos1 = 0;
-            prevPos2 = 0;
-            pos1 = 0;
-            pos2 = 0;
-            dq1_fil = 0;
-            dq2_fil  = 0;
-            prev_q1 = 0;
-            q1 = 0;;
-            prev_q2 = 0;
-            q2=0;
-            prev_mTime = mx_sleep(0);
-            mTime = prev_mTime + obj.dT_control;
+        function set_measureInitial(obj)
+% 
+%             mTime = prev_mTime + obj.dT_control;
             obj.isSetOriginMeasure = true;
  
             % iterate steps to ensure the measurement is steady
@@ -214,10 +230,10 @@ classdef pendubot_controller
                 tmp = mx_sleep(0.05);
             end
 
-            origin_absPos1 = absPos1;
-            origin_absPos2 = absPos2;
-            dq1_fil = 0;
-            dq2_fil = 0;
+            obj.origin_absPos1 = obj.absPos1;
+            obj.origin_absPos2 = obj.absPos2;
+            obj.dq1_fil = 0;
+            obj.dq2_fil = 0;
       
             % update some previous variable like prevPos1
             for i = 1:10
@@ -238,145 +254,141 @@ classdef pendubot_controller
     
         
         function obj = measurement(obj)
-            global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 
-            global origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil q1_fil q2_fil dq1 dq2 prev_mTime mTime q1_wrap q2_wrap
-            prevPos1 = pos1;
-            prevPos2 = pos2;
-            prev_q1 = q1;
-            prev_q2 = q2;
-            prev_mTime = mTime;
+%             global prevPos1 prevPos2 pos1 pos2 absPos1 absPos2 absC1 absC2 relPos1 relPos2 
+%             global origin_absPos1 origin_absPos2 q1 q2 prev_q1 prev_q2 dq1_fil dq2_fil q1_fil q2_fil dq1 dq2 prev_mTime mTime q1_wrap q2_wrap
             
-            angThres = 190;
+            % record stream variables from last iteration loop before assignning new variables
+            obj.prevPos1 = obj.pos1;
+            obj.prevPos2 = obj.pos2;
+            obj.prev_q1 = obj.q1;
+            obj.prev_q2 = obj.q2;
+            obj.prev_mTime = obj.mTime;
+            
 
+
+            % get readings from vesc
             obj.motor1.get_sensors();
             obj.motor2.get_sensors();
-            mTime = mx_sleep(0);
-            pos1 = obj.motor1.sensors.pid_pos;
-            pos2 = obj.motor2.sensors.pid_pos;
+            obj.mTime = mx_sleep(0);
+            obj.pos1 = obj.motor1.sensors.pid_pos;
+            obj.pos2 = obj.motor2.sensors.pid_pos;
             
-            if abs(pos1-prevPos1)>angThres && pos1-prevPos1<0
-                absC1 = absC1 +1;
-            elseif abs(pos1-prevPos1)>angThres && pos1-prevPos1>0
-                absC1 = absC1 -1;
+            %%%%%%%%%%%%%%%%% get joint position %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%'
+            % decode wraps from -180 to 180 to linear readings
+            % count wraps number for Joint 1
+            if abs(obj.pos1-obj.prevPos1)>obj.angThres && obj.pos1-obj.prevPos1<0
+                obj.absC1 = obj.absC1 +1;
+            elseif abs(obj.pos1-obj.prevPos1)>obj.angThres && obj.pos1-obj.prevPos1>0
+                obj.absC1 = obj.absC1 -1;
             end
-            
-            if abs(pos2-prevPos2)>angThres && pos2-prevPos2<0
-                absC2 = absC2 +1;
-            elseif abs(pos2-prevPos2)>angThres && pos2-prevPos2>0
-                absC2 = absC2 -1;
+            % count wraps number for Joint 2
+            if abs(obj.pos2-obj.prevPos2)>obj.angThres && obj.pos2-obj.prevPos2<0
+                obj.absC2 = obj.absC2 +1;
+            elseif abs(obj.pos2-obj.prevPos2)>obj.angThres && obj.pos2-obj.prevPos2>0
+                obj.absC2 = obj.absC2 -1;
             end
+            % Convert from motor positions to robot joint position according to gear ratios
+            obj.absPos1 = -1 * (obj.pos1 + obj.absC1*360) * obj.gearRatio1; %-1 is just for fliping joint position direction in my case
+            obj.absPos2 = -1 * (obj.pos2 + obj.absC2*360) * obj.gearRatio2; % you can remove it
+            % Relative joint positions w.r.t. initial zero-origin point
+            relPos1 = obj.absPos1 - obj.origin_absPos1;
+            relPos2 = obj.absPos2 - obj.origin_absPos2;
+            % convert to radian unit
+            obj.q1 = 0  + (relPos1 +180) / 180 * pi; 
+            obj.q2 = obj.q1 + (relPos2 / 180 * pi); % q2 = q1 + (q2_w.r.t_q1)
+             
+%             q1_wrap = mod(q1 + pi, 2 * pi) - pi;
+%             q2_wrap = mod(q2 + pi, 2 * pi) - pi;
+
             
-            absPos1 = -1 * (pos1 + absC1*360) * obj.gearRatio1;
-            absPos2 = -1 * (pos2 + absC2*360) * obj.gearRatio2;
-            
-            relPos1 = absPos1 - origin_absPos1;
-            relPos2 = absPos2 - origin_absPos2;
-            
-            % position
-            q1 = (relPos1 +180) / 180 * pi;
-            q2 = q1 + (relPos2 / 180 * pi);
-            
-            q1_wrap = mod(q1 + pi, 2 * pi) - pi;
-            q2_wrap = mod(q2 + pi, 2 * pi) - pi;
-            % velociy
+            %%%%%%%%%%%%%%%%%% calculate velociy by differentiating joint positions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             dt = obj.dT_Measure;
-%            dt = (mTime-prev_mTime);
-            dq1 = (q1 - prev_q1) / dt;
-            dq2 = (q2 - prev_q2) / dt;
+            dq1 = (obj.q1 - obj.prev_q1) / dt;
+            dq2 = (obj.q2 - obj.prev_q2) / dt;
             
             if ~obj.isSetOriginMeasure
                 % filtered velocity
-                q1_fil = obj.q1_filRatio *  q1_fil + (1-obj.q1_filRatio) * q1;
-                q2_fil = obj.q2_filRatio *  q2_fil + (1-obj.q2_filRatio) * q2;
+                obj.q1_fil = obj.q1_filRatio *  obj.q1_fil + (1-obj.q1_filRatio) * obj.q1; 
+                obj.q2_fil = obj.q2_filRatio *  obj.q2_fil + (1-obj.q2_filRatio) * obj.q2;
                 % filtered velocity
-                dq1_fil = obj.dq1_filRatio *  dq1_fil + (1-obj.dq1_filRatio) * dq1;
-                dq2_fil = obj.dq2_filRatio *  dq2_fil + (1-obj.dq2_filRatio) * dq2;
+                obj.dq1_fil = obj.dq1_filRatio *  obj.dq1_fil + (1-obj.dq1_filRatio) * dq1;
+                obj.dq2_fil = obj.dq2_filRatio *  obj.dq2_fil + (1-obj.dq2_filRatio) * dq2;
             else  
-                q1_fil =  q1;
-                q2_fil =  q2;
-                dq1_fil = 0;
-                dq2_fil = 0;           
+                obj.q1_fil =  obj.q1;
+                obj.q2_fil =  obj.q2;
+                obj.dq1_fil = 0;
+                obj.dq2_fil = 0;           
             end
             
 
         end
         
        
-        
-
-        
         function send_torque(obj)
-            global desTor1 desTor2 safeTorTrip isVelExceed1 isVelExceed2
             
+            %%%%%%%%%%%%%%%%%%% safe trip to prevent robot spinning too fast, (like a e-stop in software) %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             if obj.isEnableSafeTrip
-                if isVelExceed1 || isVelExceed2
-                    safeTorTrip = false;
+                if obj.isVelExceed1 || obj.isVelExceed2
+                    obj.is_safeTrip = false;
                 end
-                if ~safeTorTrip
+                if ~obj.is_safeTrip
+                    % send zero torque to stop robot
                     obj.motor1.send_current(0);
                     obj.motor2.send_current(0);
                     return
                 end
             end
             
-            if abs(desTor1) >= obj.maxTor1
-                obj.motor1.send_current(sign(desTor1) * obj.maxTor1);
+            %%%%%%%%%%%%%%%% send torque command to vesc %%%%%%%%%%%%%%%%%%%%%%%%%
+            if abs(obj.desTor1) >= obj.maxTor1
+                obj.motor1.send_current(sign(obj.desTor1) * obj.maxTor1);
             else
-                obj.motor1.send_current(desTor1); % sends current command
+                obj.motor1.send_current(obj.desTor1); % sends current command
             end
-            if abs(desTor2) >= obj.maxTor2
-                obj.motor2.send_current(sign(desTor2) * obj.maxTor2);
+            if abs(obj.desTor2) >= obj.maxTor2
+                obj.motor2.send_current(sign(obj.desTor2) * obj.maxTor2);
             else
-                obj.motor2.send_current(desTor2); % sends current command
+                obj.motor2.send_current(obj.desTor2); % sends current command
             end   
         end
   
         
         function record(obj)
-            % record data
-            global q1 q2 elapseTime RecordCell desTor1 desTor2 dq1_fil dq2_fil
-            if ~isempty(q1) && ~isempty(q2) && ~isempty(dq1_fil) && ~isempty(dq2_fil) && ~isempty(desTor1) &&  ~isempty(desTor2) && ~isempty(elapseTime) 
-                RecordCell{1} = [RecordCell{1}, q1];
-                RecordCell{2} = [RecordCell{2}, q2];
-                RecordCell{3} = [RecordCell{3}, dq1_fil];
-                RecordCell{4} = [RecordCell{4}, dq2_fil];
-                RecordCell{5} = [RecordCell{5}, desTor1];
-                RecordCell{6} = [RecordCell{6}, desTor2];
-                RecordCell{7} = [RecordCell{7}, elapseTime];
+            if ~isempty(obj.q1) && ~isempty(obj.q2) && ~isempty(obj.dq1_fil) && ~isempty(obj.dq2_fil) && ~isempty(obj.desTor1) &&  ~isempty(obj.desTor2) && ~isempty(obj.elapseTime) 
+                obj.record_buffer{1} = [obj.record_buffer{1}, obj.q1];
+                obj.record_buffer{2} = [obj.record_buffer{2}, obj.q2];
+                obj.record_buffer{3} = [obj.record_buffer{3}, obj.dq1_fil];
+                obj.record_buffer{4} = [obj.record_buffer{4}, obj.dq2_fil];
+                obj.record_buffer{5} = [obj.record_buffer{5}, obj.desTor1];
+                obj.record_buffer{6} = [obj.record_buffer{6}, obj.desTor2];
+                obj.record_buffer{7} = [obj.record_buffer{7}, obj.elapseTime];
             end
             
-            if obj.maxRecordBuffer < size(RecordCell{1},2)
+            % get rid of the part exceed the maxRecordBuffer size to save memory
+            if obj.maxRecordBuffer < size(obj.record_buffer{1},2)
                 for i = 1:7
-                    RecordCell{i} = RecordCell{i}(end-obj.maxRecordBuffer);
+                    obj.record_buffer{i} = obj.record_buffer{i}(end-obj.maxRecordBuffer);
                 end
             end
         end
             
         function task_printer(obj)
-             global q1 q2 dq1_fil dq2_fil desTor1 desTor2
-            fprintf("q1: %.2f rad \t q2: %.2f rad \t dq1_fil: %.2f rad\\s \t dq2_fil: %.2f rad\\s \t Tor1: %.2f \t Tor2: %.2f\n", q1, q2, dq1_fil, dq2_fil, desTor1, desTor2);
+            fprintf("q1: %.2f rad \t q2: %.2f rad \t dq1_fil: %.2f rad\\s \t dq2_fil: %.2f rad\\s \t Tor1: %.2f \t Tor2: %.2f\n",...
+                    obj.q1, obj.q2, obj.dq1_fil, obj.dq2_fil, obj.desTor1, obj.desTor2);
         end
         
         function task_plotter(obj)
-            global RecordCell 
             
-            if ~isempty(RecordCell{1})
+            if ~isempty(obj.record_buffer{1})
                 figure(obj.FigID);
 
                 for i = 1:6
                     ax = subplot(3,2,i);
-                    if size(RecordCell{end},2)<=(obj.fixPlotWindowTime/obj.dT_control)
-                        plot(ax, RecordCell{end}, RecordCell{i});
+                    if size(obj.record_buffer{end},2)<=(obj.fixPlotWindowTime/obj.dT_control)
+                        plot(ax, obj.record_buffer{end}, obj.record_buffer{i});
                     else
-                        plot(ax, RecordCell{end}(end - obj.fixPlotWindowTime/obj.dT_control:end), RecordCell{i}(end - obj.fixPlotWindowTime/obj.dT_control : end));
+                        plot(ax, obj.record_buffer{end}(end - obj.fixPlotWindowTime/obj.dT_control:end), obj.record_buffer{i}(end - obj.fixPlotWindowTime/obj.dT_control : end));
                     end
-%                   legend(legendList(i))
-%                     if isInitPlot
-%                         hold(ax, 'on')
-%                         legend(legendList(i))
-%                         hold(ax, 'off')
-%                         isInitPlot = false
-%                     end
                 end
                 drawnow
             end
@@ -396,12 +408,11 @@ classdef pendubot_controller
         end
         
         function task_PID(obj)
-            global q1_fil dq1_fil q2_fil dq2_fil des_q1 des_dq1_fil des_q2 des_dq2_fil desTor1 desTor2 q1 q2 dq1 dq2
-            tor1 = (des_q1 - q1_fil) * obj.PID_p1 + (des_dq1_fil - dq1)* obj.PID_d1;
-            desTor1 = sign(tor1) * min(abs(tor1), obj.maxTor1);
+            tor1 = (obj.des_q1 - obj.q1_fil) * obj.PID_p1 + (obj.des_dq1_fil - dq1)* obj.PID_d1;
+            obj.desTor1 = sign(tor1) * min(abs(tor1), obj.maxTor1);
             
-            tor2 = (des_q2 - q2_fil) * obj.PID_p2 + (des_dq2_fil - dq2)* obj.PID_d2;
-            desTor2 = sign(tor2) * min(abs(tor2), obj.maxTor2);
+            tor2 = (obj.des_q2 - obj.q2_fil) * obj.PID_p2 + (obj.des_dq2_fil - dq2)* obj.PID_d2;
+            obj.desTor2 = sign(tor2) * min(abs(tor2), obj.maxTor2);
         end
     
         
@@ -410,24 +421,51 @@ classdef pendubot_controller
             obj.motor2.delete();
         end
         
-        function turnOnSafeTorTrip(obj)
-            global safeTorTrip
-            safeTorTrip = true;
+        function set_isSafeTrip(obj)
+            obj.is_safeTrip = true;
         end
         
         function updateSafeVelocity(obj)
-            global dq1_fil dq2_fil isVelExceed1 isVelExceed2
-            if dq1_fil >= obj.maxVel1 
-                isVelExceed1 = true;
+            if abs(obj.dq1_fil) >= obj.maxVel1 
+                obj.isVelExceed1 = true;
             else
-                isVelExceed1 = false;
+                obj.isVelExceed1 = false;
             end
             
-            if dq2_fil >= obj.maxVel2
-                isVelExceed2 = true;
+            if abs(obj.dq2_fil) >= obj.maxVel2
+                obj.isVelExceed2 = true;
             else
-                isVelExceed2 = false;
+                obj.isVelExceed2 = false;
             end
+        end
+        
+        function reset_streamVar(obj)
+            obj.record_buffer = cell(1, 7);
+            obj.origin_absPos1 = 0;
+            obj.origin_absPos2 = 0;
+            obj.isInitPlot = true;
+            obj.desTor1 = 0;
+            obj.desTor2 = 0;
+            obj.isVelExceed1 = false;
+            obj.isVelExceed2 = false;
+            obj.is_safeTrip = true;
+            obj.prevPos1 = 0;
+            obj.prevPos2 = 0;
+            obj.pos1 = 0;
+            obj.pos2 = 0;
+            obj.absPos1 = 0; 
+            obj.absPos2 = 0; 
+            obj.absC1 = 0;
+            obj.absC2 = 0;
+            obj.dq1_fil = 0;
+            obj.dq2_fil = 0;        
+            obj.prev_q1 = 0;
+            obj.q1 = 0;
+            obj.prev_q2 = 0; 
+            obj.q2 = 0;
+            obj.q1_fil = 0; 
+            obj.q2_fil = 0;
+            obj.elapseTime;
         end
  
     end

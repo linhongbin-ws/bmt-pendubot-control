@@ -1,8 +1,6 @@
- %%
-addpath('./mx_vesc')
 clear all; clc;
+% addpath('..')
 
-% test how stable is the controller
 for i = 1:1
     controller = pendubot_controller();
     controller = controller.setTaskPlotter(false);
@@ -18,6 +16,3 @@ for i = 1:1
     toc
     clear controller duration
 end
-% controller.delete_controller;
-global RecordCell
-size(RecordCell)
