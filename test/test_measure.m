@@ -5,8 +5,7 @@ for i = 1:1
     controller = pendubot_controller();
     controller = controller.setTaskPlotter(false);
     controller = controller.setTaskPrinter(true);
-    %controller = controller.setTaskPlotter(true);
-    duration = 5;
+    duration = 30;
     controller = controller.start;
     tic
     while (controller.timeNow-controller.timeStart<=duration)
@@ -14,5 +13,7 @@ for i = 1:1
     end
     controller.stop;
     toc
-    clear controller duration
+    %clear controller duration
 end
+save_file_str = './data/fig1.fig';
+controller.plot_sampling_data(save_file_str)
