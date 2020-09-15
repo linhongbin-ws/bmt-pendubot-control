@@ -1,10 +1,9 @@
-function [ tau,mode] = LQR_pendubot(x, a, b, p, d, wdw, is_print)
+function [ tau, is_in_shootingRange] = LQR_pendubot(x, a, b, p, d, wdw, is_print)
 %
 % OUTPUTS:
 %    tau : control torque, return empty if this control law is not applicable.
 %    mode : LQR mode, ensure entering this part of code
 
-mode = 1;
 % SMALL_NUM_VEC = deg2rad([0.02; 0.02]);
 
 % a = 0.6;
@@ -94,8 +93,10 @@ x_tilda = [q;qd] - x_des; % x_current - x_desired
 if  x_tilda'*S*x_tilda < wdw
     xerror = x_des - [q;qd];
     tau = (K*xerror);
+    is_in_shootingRange = true;
 else
     tau = [0; 0];
+    is_in_shootingRange = false; 
 end
 
 if is_print

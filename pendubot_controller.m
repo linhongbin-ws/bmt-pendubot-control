@@ -8,6 +8,8 @@ classdef pendubot_controller < handle
         
         %task param
         dT_control = 0.002
+        dT_control_lqr = 0.002
+        dT_control_pilco = 0.02
         dT_Measure = 0.002
         dT_Sampling = 0.002
         
@@ -28,6 +30,7 @@ classdef pendubot_controller < handle
         isTaskPrinter = false
         isTaskPID = false
         isEnableLQR = false
+        isEnablePILCO = false
         isEnableSafeTrip = false
         
         IS_SEND_TOR1 = true
@@ -71,11 +74,13 @@ classdef pendubot_controller < handle
         LQR_d = 0.15
         LQR_wdw = 15
 
-        
+        % pilco
+        pilco_policy = []
+        load_policy_path = './data/pendubot_13_H150.mat'
         
         
         % record param
-        maxRecordBuffer = 500
+        maxRecordBuffer = 20000
         
         % decode position-wraping params
         angThres = 190;
@@ -123,6 +128,7 @@ classdef pendubot_controller < handle
         
         isStopTimer = false
         controller_timer = []
+        controller_type = 0
     end
     
     methods
@@ -173,6 +179,12 @@ classdef pendubot_controller < handle
   
             obj.timeStart = mx_sleep(0);
             obj.timeNow = obj.timeStart;
+            
+            try
+              rd = './pilco-matlab/';
+              addpath([rd 'base'],[rd 'util'],[rd 'gp'],[rd 'control'],[rd 'loss']);
+            catch
+            end
             
             fprintf('controller start..\n');
         end
@@ -470,13 +482,66 @@ classdef pendubot_controller < handle
         end
         
         function obj = task_control(obj)
-            if obj.isEnableLQR
-                obj.lqr_control();
+           
+            if obj.isEnableLQR && ~obj.isEnablePILCO
+                [obj.desTor1, ~] = obj.lqr_control();
+                if obj.controller_type ~= 1
+                    obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control_lqr); 
+                    obj.controller_type = 1;
+                end
+                
+            elseif ~obj.isEnableLQR && obj.isEnablePILCO
+                obj.desTor1 = obj.pilco_control();
+                if obj.controller_type ~= 2
+                    obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control_pilco); 
+                    fprintf('dt is %.4f\n\n',obj.dT_control_pilco)
+                    obj.controller_type = 2;
+                end
+                
+            elseif obj.isEnableLQR && obj.isEnablePILCO
+                [obj.desTor1, is_in_shootingRange] = obj.lqr_control();  
+                
+                if ~is_in_shootingRange
+                    obj.desTor1 = obj.pilco_control();
+                    if obj.controller_type ~= 2
+                        obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control_pilco);
+                        fprintf('Switch to pilco controller, dt: %.4f\n\n',obj.dT_control_pilco)
+                        obj.controller_type = 2;
+                    end
+                else
+                    if obj.controller_type ~= 1
+                        obj.taskControl =  mx_task(@()obj.task_control, obj.dT_control_lqr); 
+                        fprintf('Switch to lqr controller, dt: %.4f\n\n',obj.dT_control_lqr)
+                        obj.controller_type = 1;
+                    end
+                end
+              
+            else
+                obj.controller_type = 0;
             end
+            
             obj.send_torque();
         end
         
-        function obj = lqr_control(obj)
+        function desTor1 = pilco_control(obj)
+%             if obj.counter_control == 100
+%                 is_print = true;
+%                 obj.counter_control = 0;
+%             else
+%                 is_print = false;
+%                 obj.counter_control = obj.counter_control +1;
+%             end
+            if isempty(obj.pilco_policy)
+                load(obj.load_policy_path, 'policy');
+                obj.pilco_policy = policy;
+            end
+            u = pilco_control(obj.q1, obj.q2, obj.dq1_fil, obj.dq2_fil, obj.pilco_policy);
+            desTor1 = u;
+%             obj.desTor1 =  current;
+ 
+        end
+        
+        function [desTor1, is_in_shootingRange] = lqr_control(obj)
             if obj.counter_control == 100
                 is_print = true;
                 obj.counter_control = 0;
@@ -484,10 +549,11 @@ classdef pendubot_controller < handle
                 is_print = false;
                 obj.counter_control = obj.counter_control +1;
             end
-            u = LQR_pendubot([obj.q1+pi, obj.q2-obj.q1, obj.dq1_fil,  obj.dq2_fil-obj.dq1_fil].', ...
+            is_print = false;
+            [u, is_in_shootingRange] = LQR_pendubot([obj.q1+pi, obj.q2-obj.q1, obj.dq1_fil,  obj.dq2_fil-obj.dq1_fil].', ...
                                 obj.LQR_a, obj.LQR_b, obj.LQR_p, obj.LQR_d, obj.LQR_wdw, is_print);
-            current = u(1)/(29.2e-3);
-            obj.desTor1 =  current;
+            desTor1 = u(1)/(29.2e-3);
+%             obj.desTor1 =  current;
  
         end
         
@@ -536,6 +602,10 @@ classdef pendubot_controller < handle
         
         function set_enable_lqr(obj, flag)
             obj.isEnableLQR = flag;
+        end
+        
+        function set_enable_pilco(obj, flag)
+            obj.isEnablePILCO = flag;
         end
         
         function updateSafeVelocity(obj)
