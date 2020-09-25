@@ -1,6 +1,6 @@
 clear all; clc;
 addpath(genpath('./pilco-matlab'))
-load(['./data/pendubot_18_H150.mat'])
+load(['./data/pendubot_16_H60.mat'])
 dynmodel.train = @train
 % applyController; % apply controller to system
 % disp(['controlled trial # ' num2str(j)]);

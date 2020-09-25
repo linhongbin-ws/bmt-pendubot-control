@@ -76,7 +76,7 @@ classdef pendubot_controller < handle
 
         % pilco
         pilco_policy = []
-        load_policy_path = './data/pendubot_13_H150.mat'
+        load_policy_path = '/home/ben/code/bmt-pendubot-control/archive/data-2020-09-15-hz50/pendubot_13_H150.mat'
         
         
         % record param
@@ -432,7 +432,8 @@ classdef pendubot_controller < handle
                 obj.record_buffer{4} = [obj.record_buffer{4}, obj.dq2_fil];
                 obj.record_buffer{5} = [obj.record_buffer{5}, obj.desTor1];
                 obj.record_buffer{6} = [obj.record_buffer{6}, obj.desTor2];
-                obj.record_buffer{7} = [obj.record_buffer{7}, obj.elapseTime];
+                obj.record_buffer{7} = [obj.record_buffer{7}, obj.controller_type];
+                obj.record_buffer{8} = [obj.record_buffer{8}, obj.elapseTime];
                 obj.sampling_counter =  obj.sampling_counter + 1;
             end
             
@@ -474,10 +475,12 @@ classdef pendubot_controller < handle
                 plot(ax, obj.record_buffer{end}, obj.record_buffer{i});
                 legend(legend_list{i})
             end
-            try
-                saveas(gcf, save_file_str)
-            catch
-                warning("cannot save figure to %s", save_file_str)
+            if ~isempty(save_file_str)
+                try
+                    saveas(gcf, save_file_str)
+                catch
+                    warning("cannot save figure to %s", save_file_str)
+                end
             end
         end
         
@@ -624,7 +627,7 @@ classdef pendubot_controller < handle
         
         function reset_streamVar(obj)
             obj.sampling_counter = 0;
-            obj.record_buffer = cell(1, 7);
+            obj.record_buffer = cell(1, 8);
             obj.origin_absPos1 = 0;
             obj.origin_absPos2 = 0;
             obj.isInitPlot = true;

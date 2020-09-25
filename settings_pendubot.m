@@ -64,15 +64,15 @@ difi = [1 2 3 4];
 
 % 2. Set up the scenario
 % dt = 0.01;                        % [s] sampling time
-dt = 0.02;                        % [s] sampling time
-T = 3.0;                          % [s] prediction time
+dt = 0.05;                        % [s] sampling time
+T = 3;                          % [s] prediction time
 H = ceil(T/dt);                   % prediction steps (optimization horizon)
 mu0 = [0 0 pi pi]';               % initial state mean
 S0 = diag([0.1 0.1 0.01 0.01].^2);% initial state covariance
 N = 40;                           % no. of controller optimizations
-J = 2;                            % no. of init. training rollouts (of length H)
+J = 1;                            % no. of init. training rollouts (of length H)
 K = 1;                            % no. of init. states for which we optimize
-nc = 200;                         % size of controller training set
+nc = 300;                         % size of controller training set
 
 % 3. Set up the plant structure
 plant.dynamics = @dynamics_pendubot;               % dynamics ODE function
@@ -93,7 +93,7 @@ plant.prop = @propagated; % handle to function that propagates state over time
 % 4. Set up the policy structure
 policy.fcn = @(policy,m,s)conCat(@congp,@gSat,policy,m,s);% controller 
                                                           % representation
-policy.maxU = 3;                                        % max. amplitude of 
+policy.maxU = 2.5;                                        % max. amplitude of 
                                                           % torque
 [mm ss cc] = gTrig(mu0, S0, plant.angi);                  % represent angles 
 mm = [mu0; mm]; cc = S0*cc; ss = [S0 cc; cc' ss];         % in complex plane  
@@ -110,7 +110,7 @@ cost.fcn = @loss_pendubot;                  % cost function
 cost.gamma = 1;                             % discount factor
 cost.p = [0.17, 0.145];                         % lengths of pendulums
 cost.width = 0.17;                          % cost function width
-cost.expl = 0;                              % exploration parameter (UCB)
+cost.expl = -1;                              % exploration parameter (UCB)
 cost.angle = plant.angi;                    % index of angle (for cost function)
 cost.target = [0 0 0 0]';                   % target state
 
@@ -124,7 +124,7 @@ trainOpt = [300 500];                % defines the max. number of line searches
                                      % trainOpt(2): sparse GP (FITC)
 
 % 7. Parameters for policy optimization
-opt.length = 200;                        % max. number of line searches
+opt.length = 100;                        % max. number of line searches
 opt.MFEPLS = 20;                         % max. number of function evaluations
                                          % per line search
 opt.verbosity = 1;                       % verbosity: specifies how much 
@@ -144,5 +144,7 @@ fantasy.mean = cell(1,N); fantasy.std = cell(1,N);
 realCost = cell(1,N); M = cell(N,1); Sigma = cell(N,1);
 
 
-%10 sampling data downgrade
+% %10 sampling data downgrade
 % cost.sampling_to_meausre_ratio = 5;
+
+rng('default');

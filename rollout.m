@@ -78,12 +78,13 @@ y = zeros(H, nX); L = zeros(1, H); next = zeros(1,length(simi));
 
 % start controller
 controller.set_zeroTor();
+controller.dT_Sampling = plant.dt;
 controller = controller.start();
 
 state = [0,0,0,0];
 
 i = 0;
-while(controller.sampling_counter<= H) %-------------------------------------------- generate trajectory
+while(size(controller.record_buffer{1},2)<= H) %-------------------------------------------- generate trajectory
   controller = controller.run();
   if i ~= size(controller.record_buffer{1},2)
       i = size(controller.record_buffer{1},2); % udpate i 
@@ -122,7 +123,10 @@ while(controller.sampling_counter<= H) %----------------------------------------
       if isfield(policy, 'fcn')
         u(i,:) = policy.fcn(policy,s(poli),zeros(length(poli)));
       else
-        u(i,:) = policy.maxU.*(2*rand(1,nU)-1);
+        xmin=0.6;
+        xmax=1;
+        rv=xmin+rand*(xmax-xmin);
+        u(i,:) = policy.maxU*rv*sign(randi([0 1])-0.5);
       end
       latent(i,:) = [state u(i,:)];                                  % latent state
 
@@ -137,7 +141,7 @@ controller.set_zeroTor();
 controller.stop();
 controller.delete_controller();
 if isfield(policy, 'fcn')
-    save_file_str = sprintf('./data/measure_%d.fig', j);
+    save_file_str = sprintf('./data/measure_%d.png', j);
     controller.plot_sampling_data(save_file_str)
 end
 clearvars controller

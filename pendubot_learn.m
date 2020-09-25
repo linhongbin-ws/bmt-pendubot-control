@@ -20,6 +20,10 @@ clear all; close all;
 settings_pendubot;            % load scenario-specific settings
 basename = 'pendubot_';       % filename used for saving data
 
+if not(isfolder('data'))
+    mkdir('data')
+end
+
 % 2. Initial J random rollouts
 for jj = 1:J
   [xx, yy, realCost{jj}, latent{jj}] = ...
